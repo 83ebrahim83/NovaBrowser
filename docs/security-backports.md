@@ -8,6 +8,75 @@ takes security fixes by backport. This page is how to check that claim.
 How fixes are found, adapted and landed is in [`backporting.md`](backporting.md).
 Each patch file in `patches/security/` carries its own provenance header.
 
+## 0.4.5 (draft)
+
+Six backports taken from the watcher's September 2026 Chrome 155/156 releases,
+and three held. Each was adapted to M140 and verified to apply cleanly against
+the checkout at `/opt/cobalt/chromium/m140/src`. The series, with all nine in
+it, was run twice, and the second pass reported every backport already applied,
+so no two share diff context. Every file the last five touch compiles in
+`out/Default`, and a full build carrying all nine succeeded on 2026-10-08. Five
+more candidates were evaluated and deferred, and one does not apply.
+
+| Issue | CVE | Severity | Component | Upstream | Backport |
+|---|---|---|---|---|---|
+| #152 | CVE-2026-91726 | Critical | Out of bounds read in WebGL (Imagination GLES cache) | src `416eced3da89` on refs/branch-heads/7977 (M152) | adapted; Android-only |
+| #164 | CVE-2026-91724 | High | Use after free in Input (event queues) | src `f1ba7dd9b41c` on refs/branch-heads/7977 (M152) | adapted; tests omitted |
+| #166 | CVE-2026-91728 | High | Integer overflow in V8 (`FeedbackVector::SizeFor`) | v8 `d1ce50477c2e` on refs/branch-heads/15.2 (M152) | adapted; tests omitted |
+| #234 | CVE-2026-95339 | Critical | Use after free in ServiceWorker (reentrant job abort) | src `bd4a88f4205c` on refs/branch-heads/7977 (M152) | adapted; tests omitted |
+| #238 | CVE-2026-95357 | Critical | Out of bounds write in GPU (ANGLE GL, `glTexImage3D` depth increase, Qualcomm Android) | angle `8983f40bc8ef` on chromium/8059 (M155) | logic verbatim; feature placed apart from other ANGLE backports |
+| #180 | CVE-2026-91747 | High | Use after free in Skia (glyph atlas generation on a partial update) | skia `4ca59aa76296` on chrome/m152 | logic verbatim; M140's `GrAtlasManager.cpp` / `TextAtlasManager.cpp` |
+
+- **#238**'s feature sits after `ResetTexImage2DBaseLevel` in `util/autogen`
+  rather than in its alphabetical slot, which is the line next to #4's
+  `ReattachTextureToFboAfterLayerIncrease`. Those maps are keyed, so order does
+  not matter.
+
+### Held: device regression
+
+The adapted patches are in `patches/security/`, and their series entries are
+commented out. A device test on 2026-10-08 (Galaxy M31, Mali GPU) of the full
+build carrying all nine found that an accelerated 2D canvas which has drawn
+text or an anti-aliased path reads back `51,170,122,253` instead of
+`51,170,119,255` for an opaque `#3a7` fill with `getImageData`. This hits every
+pixel, not only those near the drawing. Plain `fillRect`s and CPU canvases
+(`willReadFrequently`) read back correctly, and the 0.4.3 nightly is correct in
+every case. Text and paths go through the vertex-buffer upload path and plain
+rects do not, which points first at #209 and then at the two read/write-back
+fixes. The build host was removed the same day, so this was not bisected. Each
+of the three comes back only after a rebuild with it reverted clears the repro
+(`canvas-readback-repro.html`, kept beside that build's APK).
+
+| Issue | CVE | Severity | Component | Upstream | Backport |
+|---|---|---|---|---|---|
+| #209 | CVE-2026-93387 | High | Improper state validation in Skia (silent `updateData` failure) | skia `f593e0fb8833` on chrome/m152 | verbatim except `GrDrawingManager` |
+| #246 | CVE-2026-95293 | High | Uninitialized resource in GPU (`GLTextureHolder` upload/readback errors) | src `dee0423444e3` on refs/branch-heads/7977 (M152) | logic verbatim |
+| #354 | CVE-2026-102319 | High | Uninitialized resource in GPU (RasterDecoder marks SharedImage cleared after a failed upload) | src `ef6ecad70a04` on refs/branch-heads/7977 (M152) | adapted; refactor hunks and tests omitted |
+
+- **#209** returns `GrRenderTask::ExecutionResult` upstream, a type that came
+  in with CVE-2026-91740 (deferred below). M140's `executeRenderTasks()` still
+  returns "any task executed", so a failed upload resets the flush state and
+  returns false. No task runs, so nothing draws from the stale buffers, which
+  is the fix.
+- **#354** checks for GL errors in M140's existing `!IsCleared()` branch.
+  Upstream also has a `success` flag there, from a later change. Upstream's
+  swap of three drain loops for the new `DrainGLErrors()` changes no behaviour
+  and is left out, so this patch shares no context with #246.
+
+### Deferred
+
+| Issue | CVE | Severity | Component | Reason |
+|---|---|---|---|---|
+| #174, #169, #358 | CVE-2026-91740, CVE-2026-91733, CVE-2026-102325 | High | Skia Ganesh flush-failure handling | One upstream series: skia `559b075da530` (render-task execution results) and `e8efd15f214a` (`GrDirectContext::FlushResult`, a public API change), then src `648496c1b066` (Chromium's callers). It stands on four July 2026 Ganesh changes M140 does not have (`731888c3`, `04dbd152`, `30d6603d`, `cee83412`). Taking it means porting six Skia changes plus Chromium's side, so it is a project of its own, not a backport. |
+| #375 | CVE-2026-103629 | High | Integer overflow in Skia (32-bit `SkPath` generation ID) | skia `76f502419c33` widens the ID to 64 bits in `SkPathData`, which M140 does not have. The Chromium half (`395f22b533ce`) widens the paint-cache IPC and regenerates command buffer code. Two ports, both needing a full rebuild. |
+| #232 | CVE-2026-95322 | Critical | Out of bounds write in GPU (AHardwareBuffer NV12 readback) | The vulnerable code path (`AHardwareBuffer_lockPlanes` NV12 readback in `ahardwarebuffer_image_backing_factory.cc`) does not exist in M140. It was introduced in a later milestone, so this CVE is not applicable to Cobalt's Chromium 140 base. |
+
+### Does not apply to Cobalt
+
+| Issue | CVE | Why |
+|---|---|---|
+| #341 | CVE-2026-102303 | The fix (src `931dace617e9`, M153) is in `GLES2DecoderImpl`'s lazy clear and `framebuffer_manager.cc`, which are the validating decoder. Cobalt always runs the passthrough decoder (see #1, #65 and #147). |
+
 ## 0.4.3 (September 2026)
 
 28 fixes, from the watcher's second batch (#26 to #35, the Chrome 153 release

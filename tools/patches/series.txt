@@ -266,3 +266,24 @@ backport .                 CVE-2026-87504
 backport .                 CVE-2026-87445
 backport .                 CVE-2026-87510
 backport .                 CVE-2026-87442
+#
+# 0.4.5. Four backports from the watcher's September 2026 Chrome 155/156
+# releases. Each was adapted to M140 and verified to apply cleanly against the
+# checkout at /opt/cobalt/chromium/m140/src before this release.
+backport .                 CVE-2026-91726
+backport .                 CVE-2026-91724
+backport v8                CVE-2026-91728
+backport .                 CVE-2026-95339
+#
+# Then a Skia and an ANGLE fix from the same releases. The ANGLE one declares
+# its feature away from every other ANGLE backport's insertions.
+backport third_party/skia  CVE-2026-91747
+backport third_party/angle CVE-2026-95357
+#
+# Held: a device test of the build carrying these three found accelerated
+# canvases reading back wrong after text or path draws (security-backports.md,
+# 0.4.5). Each comes back only once a rebuild with it reverted clears it.
+# backport third_party/skia  CVE-2026-93387
+# backport .                 CVE-2026-95293
+# backport .                 CVE-2026-102319
+
